@@ -75,7 +75,7 @@ module.exports = {
         player.play(resource);
         connection.subscribe(player);
 
-        await interaction.followUp({ content: `Joue le fichier : ${attachment.name}` });
+        await interaction.followUp({ content: `Joue le fichier : ${attachment.name}` , ephemeral: true });
 
         // Quitter le salon vocal après la lecture
         player.on('stateChange', (oldState, newState) => {

@@ -1,76 +1,73 @@
-const { SlashCommandBuilder } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, NoSubscriberBehavior } = require('@discordjs/voice');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios'); // Pour télécharger le fichier
+const fs = require('node:fs');
+const path = require('node:path');
+const {Client, Events, GatewayIntentBits, Collection, AttachmentBuilder} = require('discord.js');
+const sequelize = require('./database/database');
+const User = require('./database/models/User');
+const foldersPath = path.join(__dirname, 'features');
+const commandFolders = fs.readdirSync(foldersPath);
+const Guild = require('./database/models/Guild');
 
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('play')
-        .setDescription('Joue un fichier MP3 dans le salon vocal')
-        .addAttachmentOption(option =>
-            option.setName('file')
-                .setDescription('Le fichier MP3 à jouer')
-                .setRequired(true)),
-    async execute(interaction) {
-        const attachment = interaction.options.getAttachment('file');
+require("dotenv").config();
 
-        if (!attachment.contentType.startsWith('audio/mpeg')) {
-            return interaction.reply({ content: 'Veuillez télécharger un fichier MP3 valide.', ephemeral: true });
+// Intents
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,  // Si vous voulez traiter le contenu des messages
+        GatewayIntentBits.GuildMembers,  // Si vous avez besoin d'accéder aux membres
+        GatewayIntentBits.GuildVoiceStates,
+    ],
+
+});
+
+// Syncro DB
+sequelize.sync().then(() => {
+    console.log('Base de données synchronisée');
+}).catch(err => {
+    console.error('Erreur lors de la synchronisation de la base de données :', err);
+});
+
+// Initialisation des commandes
+client.commands = new Collection();
+for (const folder of commandFolders) {
+    const commandsPath = path.join(foldersPath, folder);
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+    for (const file of commandFiles) {
+        const filePath = path.join(commandsPath, file);
+        const command = require(filePath);
+        // Set a new item in the Collection with the key as the command name and the value as the exported module
+        if ('data' in command && 'execute' in command) {
+            client.commands.set(command.data.name, command);
+        } else {
+            console.log(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
         }
+    }
+}
 
-        // Vérifier si l'utilisateur est dans un salon vocal
-        const voiceChannel = interaction.member.voice.channel;
-        if (!voiceChannel) {
-            return interaction.reply({ content: 'Vous devez être dans un salon vocal pour utiliser cette commande.', ephemeral: true });
+// Vérification des interactions
+client.on(Events.InteractionCreate, async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+
+    const command = client.commands.get(interaction.commandName);
+    if (!command) return;
+
+    try {
+        await command.execute(interaction);
+    } catch (error) {
+        console.error(error);
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({ content: 'Une erreur est survenue lors de l\'exécution de cette commande.', ephemeral: true });
+        } else {
+            await interaction.reply({ content: 'Une erreur est survenue lors de l\'exécution de cette commande.', ephemeral: true });
         }
+    }
+});
 
-        // Télécharger le fichier MP3
-        const response = await axios({
-            url: attachment.url,
-            method: 'GET',
-            responseType: 'stream',
-        });
 
-        const filePath = path.join(__dirname, '..', '..', 'music', `${attachment.name}`);
-        const writer = fs.createWriteStream(filePath);
+// Ready up
+client.once(Events.ClientReady, readyClient => {
+    console.log(`Up as ${readyClient.user.tag}`);
+});
 
-        response.data.pipe(writer);
-
-        await new Promise((resolve, reject) => {
-            writer.on('finish', resolve);
-            writer.on('error', reject);
-        });
-
-        // Rejoindre le salon vocal
-        const connection = joinVoiceChannel({
-            channelId: voiceChannel.id,
-            guildId: voiceChannel.guild.id,
-            adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-        });
-
-        // Créer un lecteur audio
-        const player = createAudioPlayer({
-            behaviors: {
-                noSubscriber: NoSubscriberBehavior.Pause,
-            },
-        });
-
-        // Créer une ressource audio à partir du fichier MP3
-        const resource = createAudioResource(filePath);
-
-        // Jouer le fichier audio
-        player.play(resource);
-        connection.subscribe(player);
-
-        await interaction.reply({ content: `Joue le fichier : ${attachment.name}`, ephemeral: true });
-
-        // Quitter le salon vocal après la lecture
-        player.on('stateChange', (oldState, newState) => {
-            if (newState.status === 'idle') {
-                connection.destroy();
-                fs.unlinkSync(filePath); // Supprimer le fichier après lecture
-            }
-        });
-    },
-};
+client.login(process.env.DISCORD_TOKEN);

@@ -13,16 +13,18 @@ module.exports = {
                 .setDescription('Le fichier MP3 à jouer')
                 .setRequired(true)),
     async execute(interaction) {
+        await interaction.deferReply(); // Informe Discord que la réponse va prendre plus de temps
+
         const attachment = interaction.options.getAttachment('file');
 
         if (!attachment.contentType.startsWith('audio/mpeg')) {
-            return interaction.reply({ content: 'Veuillez télécharger un fichier MP3 valide.', ephemeral: true });
+            return interaction.followUp({ content: 'Veuillez télécharger un fichier MP3 valide.', ephemeral: true });
         }
 
         // Vérifier si l'utilisateur est dans un salon vocal
         const voiceChannel = interaction.member.voice.channel;
         if (!voiceChannel) {
-            return interaction.reply({ content: 'Vous devez être dans un salon vocal pour utiliser cette commande.', ephemeral: true });
+            return interaction.followUp({ content: 'Vous devez être dans un salon vocal pour utiliser cette commande.', ephemeral: true });
         }
 
         // Télécharger le fichier MP3
@@ -49,7 +51,7 @@ module.exports = {
 
         // Vérifier si le fichier a été correctement téléchargé
         if (!fs.existsSync(filePath)) {
-            return interaction.reply({ content: 'Erreur lors du téléchargement du fichier MP3.', ephemeral: true });
+            return interaction.followUp({ content: 'Erreur lors du téléchargement du fichier MP3.', ephemeral: true });
         }
 
         // Rejoindre le salon vocal
@@ -73,7 +75,7 @@ module.exports = {
         player.play(resource);
         connection.subscribe(player);
 
-        await interaction.reply({ content: `Joue le fichier : ${attachment.name}` });
+        await interaction.followUp({ content: `Joue le fichier : ${attachment.name}` });
 
         // Quitter le salon vocal après la lecture
         player.on('stateChange', (oldState, newState) => {
